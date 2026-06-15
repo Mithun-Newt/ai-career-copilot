@@ -332,26 +332,34 @@ npm run dev
 
 ## 🐳 Docker Setup
 
-Run the full backend + PostgreSQL stack:
+Run the entire application stack (Frontend + Backend + PostgreSQL) with a single command:
 
 ```bash
 # From the project root directory
-docker-compose up --build
+docker compose up --build
 ```
 
 This will:
 1. Start a **PostgreSQL 15** container with persistent volume storage
-2. Build and launch the **FastAPI backend** container
-3. Expose the API at `http://localhost:8000`
+2. Build and launch the **FastAPI backend** container (port `8000`)
+3. Build the **React + Vite frontend** container and serve it using Nginx (port `3000`)
 
-> **Note:** Run the React frontend locally using `npm run dev` pointing to `http://localhost:8000`.
+### Expected URLs
+
+| Service | URL |
+|---|---|
+| 🌐 Frontend App | [http://localhost:3000](http://localhost:3000) |
+| ⚡ Backend API | [http://localhost:8000](http://localhost:8000) |
+| 📖 Swagger Docs | [http://localhost:8000/api/v1/docs](http://localhost:8000/api/v1/docs) |
+
+### Stopping the Services
 
 ```bash
 # Stop containers
-docker-compose down
+docker compose down
 
 # Stop and remove all data volumes
-docker-compose down -v
+docker compose down -v
 ```
 
 ---
