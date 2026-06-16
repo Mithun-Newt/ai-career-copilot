@@ -1,6 +1,6 @@
 import uuid
 from typing import Optional, Any
-from sqlalchemy import String, Text, Integer, ForeignKey
+from sqlalchemy import String, Text, Integer, ForeignKey, Boolean
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
@@ -44,6 +44,13 @@ class Resume(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         JSONB,
         nullable=True,
         doc="Structured JSON payload representing parsed experience, education, etc."
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean(),
+        default=True,
+        nullable=False,
+        server_default="true",
+        doc="Indicates if this is the active resume version for career context"
     )
 
     # --- Relationships ---

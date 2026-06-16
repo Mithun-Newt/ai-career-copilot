@@ -202,19 +202,36 @@ class ATSService:
                 error_detail = f"LangChain invocation failure during ATS analysis: {str(final_err)}"
                 logger.error(error_detail)
                 print(error_detail)
-                # Fallback to local hardcoded mock data so the request never returns 500
-                logger.warning("All LLM attempts failed. Loading fallback template...")
-                print("All LLM attempts failed. Loading fallback template...")
+                # Fallback to dynamic template instead of hardcoded catalog values to maintain customized evaluations
+                logger.warning("All LLM attempts failed. Loading customized fallback template based on job description...")
+                print("All LLM attempts failed. Loading customized fallback template based on job description...")
+                
+                # Derive dynamic values from the job description and resume
+                jd_words = [w.strip(".,()[]:;\"'") for w in job_description.lower().split() if len(w) > 4]
+                # Filter unique keywords that represent skills or technologies
+                potential_skills = list(dict.fromkeys([w.capitalize() for w in jd_words if w in [
+                    "python", "javascript", "react", "typescript", "golang", "java", "rust", "c++", "docker", 
+                    "kubernetes", "aws", "gcp", "azure", "sql", "nosql", "postgres", "mongodb", "redis", "kafka", 
+                    "machine", "learning", "deep", "llm", "verilog", "systemverilog", "virtuoso", "vivado", "rtl"
+                ]]))
+                
+                matched_words = [s for s in potential_skills if s.lower() in resume_content.lower()]
+                missing_words = [s for s in potential_skills if s.lower() not in resume_content.lower()]
+                
+                score_calc = 50
+                if potential_skills:
+                    score_calc = int((len(matched_words) / len(potential_skills)) * 100)
+                
                 result = ATSAnalysisAIOutput(
-                    ats_score=75,
-                    match_percentage=65,
-                    missing_skills=["System Design", "Cloud Infrastructure"],
-                    missing_keywords=["Scalability", "Production Deployments"],
-                    strengths=["Solid programming core", "Clean REST API configurations"],
-                    weaknesses=["Missing enterprise scale deployments", "Limited unit testing coverage metrics"],
-                    improvement_suggestions=["Add clear deployment metrics to project entries", "Quantify software accomplishments"],
-                    interview_preparation_topics=["High concurrency scaling", "Microservices integration"],
-                    recommended_projects=["Build a containerized message queue consumer", "Configure a CI/CD build actions runner"]
+                    ats_score=score_calc,
+                    match_percentage=score_calc,
+                    missing_skills=missing_words if missing_words else ["Specific domain toolsets"],
+                    missing_keywords=[m.lower() for m in missing_words] if missing_words else ["specialized framework integrations"],
+                    strengths=[f"Found technology alignments: {', '.join(matched_words[:3])}" if matched_words else "Core experience matches basic job terms"],
+                    weaknesses=[f"Missing target elements: {', '.join(missing_words[:3])}" if missing_words else "Opportunities for direct tooling experience"],
+                    improvement_suggestions=[f"Include detailed projects using {w}" for w in missing_words[:2]] if missing_words else ["Highlight custom projects"],
+                    interview_preparation_topics=[f"Concepts in {w}" for w in missing_words[:2]] if missing_words else ["General system design"],
+                    recommended_projects=[f"Build an end-to-end project applying {w}" for w in missing_words[:2]] if missing_words else ["Build a production-grade application"]
                 )
 
         # 5. Persist ATS Analysis to DB

@@ -39,6 +39,12 @@ class SkillGapResponse(BaseModel):
     """
     Validation schema detailing user skill match percentages and categorical gaps.
     """
+    core_required: List[str] = Field(default=[], description="Direct core domain/technical skills/concepts required for the target role")
+    core_matched: List[str] = Field(default=[], description="Skills from core_required that the candidate possesses")
+    supporting_required: List[str] = Field(default=[], description="Supporting tools, programming languages, technologies expected")
+    supporting_matched: List[str] = Field(default=[], description="Skills from supporting_required that the candidate possesses")
+    transferable_required: List[str] = Field(default=[], description="General engineering concepts, soft skills, mathematics expected")
+    transferable_matched: List[str] = Field(default=[], description="Skills from transferable_required that the candidate possesses")
     matched_skills: List[str] = Field(..., description="List of matching skills")
     missing_skills: List[str] = Field(..., description="List of missing skills required for the role")
     match_percentage: int = Field(..., description="Calculated match percentage score")
@@ -48,4 +54,8 @@ class SkillGapResponse(BaseModel):
         ...,
         description="Missing skills grouped by their corresponding domain categories"
     )
+    strengths: List[str] = Field(default=[], description="Highly aligned competencies or experiences identified")
+    weaknesses: List[str] = Field(default=[], description="Lacked credentials or technologies required")
+    learning_priorities: List[str] = Field(default=[], description="Actionable immediate learning priority recommendations")
+    reasoning: Optional[str] = Field(None, description="Detailed AI analysis explaining the match dynamics")
 

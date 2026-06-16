@@ -86,6 +86,9 @@ class ResumeService:
                 "experience": []
             }
 
+        # Deactivate all other user resumes so this newly uploaded one becomes the active one
+        db.query(Resume).filter(Resume.user_id == user_id).update({"is_active": False})
+
         # 7. Save metadata record and parsed structures to database
         db_resume = Resume(
             user_id=user_id,
@@ -94,10 +97,23 @@ class ResumeService:
             file_size=file_size,
             raw_text=raw_text,
             parsed_data=parsed_data,
+            is_active=True,
         )
         db.add(db_resume)
         db.commit()
         db.refresh(db_resume)
+
+        # Update user profile with latest resume info
+        if parsed_data:
+            from app.models.profile import Profile
+            profile = db.query(Profile).filter(Profile.user_id == user_id).first()
+            if not profile:
+                profile = Profile(user_id=user_id)
+                db.add(profile)
+            profile.title = parsed_data.get("title", profile.title)
+            profile.bio = parsed_data.get("bio", profile.bio)
+            profile.experience_years = parsed_data.get("experience_years", profile.experience_years)
+            db.commit()
 
         # 8. Synchronize extracted skills dynamically with User profile
         if parsed_data and "skills" in parsed_data and parsed_data["skills"]:
@@ -107,8 +123,6 @@ class ResumeService:
             )
 
         return db_resume
-
-
 
     def get_resume(self, db: Session, *, resume_id: uuid.UUID, user_id: uuid.UUID) -> Resume:
         """
@@ -137,12 +151,50 @@ class ResumeService:
 
         return resume_repository.get_resumes_by_user(db, user_id=user_id, skip=skip, limit=limit)
 
+    def activate_resume(self, db: Session, *, resume_id: uuid.UUID, user_id: uuid.UUID) -> Resume:
+        """
+        Sets a specific resume as active, marking all others for the user as inactive,
+        and updates the user's Profile & skills dynamically.
+        """
+        # Enforce resource ownership checks
+        resume = self.get_resume(db, resume_id=resume_id, user_id=user_id)
+        
+        # Deactivate all others
+        db.query(Resume).filter(Resume.user_id == user_id).update({"is_active": False})
+        
+        # Activate this one
+        resume.is_active = True
+        db.commit()
+        db.refresh(resume)
+        
+        # Sync profile details
+        if resume.parsed_data:
+            from app.models.profile import Profile
+            profile = db.query(Profile).filter(Profile.user_id == user_id).first()
+            if not profile:
+                profile = Profile(user_id=user_id)
+                db.add(profile)
+            profile.title = resume.parsed_data.get("title", profile.title)
+            profile.bio = resume.parsed_data.get("bio", profile.bio)
+            profile.experience_years = resume.parsed_data.get("experience_years", profile.experience_years)
+            db.commit()
+            
+            # Sync skills
+            if "skills" in resume.parsed_data and resume.parsed_data["skills"]:
+                from app.services.skill_service import skill_service
+                skill_service.sync_user_skills_from_resume(
+                    db, user_id=user_id, resume_skills=resume.parsed_data["skills"]
+                )
+                
+        return resume
+
     def delete_resume(self, db: Session, *, resume_id: uuid.UUID, user_id: uuid.UUID) -> None:
         """
         Deletes a resume record from database metadata and removes the physical file from disk storage.
         """
         # Fetches resume while enforcing ownership constraints
         resume = self.get_resume(db, resume_id=resume_id, user_id=user_id)
+        was_active = resume.is_active
         
         # Delete from local file system
         file_path = pathlib.Path(resume.file_path)
@@ -155,6 +207,42 @@ class ResumeService:
 
         # Clear database entry
         resume_repository.delete(db, id=resume_id)
+        db.commit()
+
+        # Cascade cleanups
+        # 1. Delete all generated roadmaps linked to this user
+        from app.models.roadmap import Roadmap
+        db.query(Roadmap).filter(Roadmap.user_id == user_id).delete()
+        
+        # 1.5. Delete all ATS evaluations linked to this user or this resume
+        from app.models.ats_analysis import ATSAnalysis
+        db.query(ATSAnalysis).filter((ATSAnalysis.user_id == user_id) | (ATSAnalysis.resume_id == resume_id)).delete()
+        
+        # 2. Reset Profile details derived from the resume
+        from app.models.profile import Profile
+        profile = db.query(Profile).filter(Profile.user_id == user_id).first()
+        if profile:
+            profile.title = None
+            profile.bio = None
+            profile.experience_years = None
+            
+        # 3. Clear user profile skills database relations
+        from app.models.user import User
+        user = db.query(User).filter(User.id == user_id).first()
+        if user:
+            user.skills = []
+            
+        # 4. Clear Skill Intelligence gap analysis cache
+        from app.ai.skill_gap_analyzer import skill_gap_analyzer
+        skill_gap_analyzer._cache.clear()
+        
+        db.commit()
+
+        # If deleted resume was the active one, activate the latest remaining one if any
+        if was_active:
+            latest = db.query(Resume).filter(Resume.user_id == user_id).order_by(Resume.created_at.desc()).first()
+            if latest:
+                self.activate_resume(db, resume_id=latest.id, user_id=user_id)
 
 
 # Expose service singleton

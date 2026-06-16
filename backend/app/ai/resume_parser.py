@@ -1,24 +1,13 @@
 import re
 import pathlib
+import json
 import fitz  # PyMuPDF
 from typing import List, Dict, Any
 from app.utils.exceptions import DomainException
 
-# Common skill catalog for heuristic matching
-COMMON_SKILLS = [
-    "python", "javascript", "typescript", "golang", "java", "c++", "ruby", "rust",
-    "sql", "postgresql", "mysql", "mongodb", "redis", "elasticsearch",
-    "fastapi", "django", "flask", "express", "react", "next.js", "vue", "angular",
-    "html", "css", "tailwind", "bootstrap",
-    "aws", "gcp", "azure", "docker", "kubernetes", "terraform", "ansible", "jenkins", "git",
-    "machine learning", "deep learning", "nlp", "pytorch", "tensorflow", "langchain", "openai"
-]
-
-
 class ResumeParser:
     """
-    Parser utilizing PyMuPDF (fitz) for PDF extraction and heuristics/regular expressions
-    to structure resume data.
+    Parser utilizing PyMuPDF (fitz) for PDF extraction and LLM structured parsing.
     """
 
     def extract_text(self, file_path: str) -> str:
@@ -58,91 +47,126 @@ class ResumeParser:
 
     def parse_resume(self, raw_text: str) -> Dict[str, Any]:
         """
-        Heuristic-based parser using regex matching and section splitting.
+        AI-first resume parser with raw JSON prompt fallback.
+        No heuristic catalogs are used.
         """
-        lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+        parsed_data = None
+        from app.ai.roadmap_generator import get_llm
+        llm = get_llm()
+        if llm is None:
+            raise RuntimeError("LLM Provider is not configured. Resume parsing requires an active LLM.")
 
-        # 1. Heuristic for Name: First non-empty line that doesn't contain common resume noise
-        name = "Unknown"
-        for line in lines[:5]:
-            # Ensure it is not an email, phone number, website link or contains typical section headers
-            lower_line = line.lower()
-            if (
-                "@" not in line 
-                and not re.search(r'\d{4,}', line) 
-                and not any(hdr in lower_line for hdr in ["education", "experience", "skills", "summary", "contact"])
-                and len(line.split()) <= 4
-            ):
-                name = line
-                break
+        try:
+            from pydantic import BaseModel, Field
+            from langchain_core.prompts import ChatPromptTemplate
 
-        # 2. Regex for Email
-        email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
-        email_match = re.search(email_pattern, raw_text)
-        email = email_match.group(0) if email_match else "Unknown"
+            class ResumeFullExtraction(BaseModel):
+                name: str = Field(description="Candidate's full name.")
+                email: str = Field(description="Candidate's email address.")
+                phone: str = Field(description="Candidate's phone number.")
+                title: str = Field(description="Candidate's professional title or role (e.g. Software Engineer, VLSI Design Engineer).")
+                bio: str = Field(description="A brief 2-3 sentence biography summary of the candidate's core skills and background.")
+                experience_years: int = Field(description="Estimated total years of professional experience as an integer.")
+                education: List[str] = Field(description="List of education history entries.")
+                projects: List[str] = Field(description="List of projects mentioned in the resume.")
+                experience: List[str] = Field(description="List of professional work experience entries.")
+                certifications: List[str] = Field(description="List of certifications.")
+                technical_skills: List[str] = Field(description="List of technical skills (e.g. Python, Verilog, C++).")
+                tools: List[str] = Field(description="List of developer/engineering tools (e.g. Git, Docker, Vivado, Cadence).")
+                frameworks: List[str] = Field(description="List of software/modelling frameworks (e.g. FastAPI, React, PyTorch).")
+                domain_skills: List[str] = Field(description="List of engineering or conceptual domain skills (e.g. Digital VLSI Design, FPGA Design, Machine Learning).")
 
-        # 3. Regex for Phone Number (matches standard variations)
-        phone_pattern = r'(\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}'
-        phone_match = re.search(phone_pattern, raw_text)
-        phone = phone_match.group(0) if phone_match else "Unknown"
-
-        # 4. Keyword Match for Skills
-        matched_skills = []
-        lower_raw_text = raw_text.lower()
-        for skill in COMMON_SKILLS:
-            # Word boundary check to avoid partial matching (e.g. "git" matching "digital")
-            pattern = rf"\b{re.escape(skill)}\b"
-            if re.search(pattern, lower_raw_text):
-                matched_skills.append(skill.title() if len(skill) > 3 or skill in ["git", "sql", "aws", "gcp", "nlp"] else skill.upper())
-
-        # 5. Heuristic Section Splitting for Education and Experience
-        education_items = self._extract_section_items(lines, ["education", "academic history", "academics"])
-        experience_items = self._extract_section_items(lines, ["experience", "work history", "employment", "professional experience"])
-
-        return {
-            "name": name,
-            "email": email,
-            "phone": phone,
-            "skills": matched_skills,
-            "education": education_items,
-            "experience": experience_items,
-        }
-
-    def _extract_section_items(self, lines: List[str], headers: List[str]) -> List[str]:
-        """
-        Extract bullet list or paragraph items from a section identified by header tags.
-        """
-        section_items = []
-        in_section = False
-        
-        # Other potential headers to signal the end of this section
-        all_other_stop_headers = ["education", "experience", "work history", "employment", "skills", "projects", "certifications", "languages", "summary", "contact", "about me"]
-        
-        for line in lines:
-            lower_line = line.lower()
+            structured_llm = llm.with_structured_output(ResumeFullExtraction)
+            prompt_template = ChatPromptTemplate.from_messages([
+                ("system", (
+                    "You are an expert resume parser. Extract a comprehensive, structured representation "
+                    "of the candidate's details from the resume text.\n"
+                    "Extract details accurately without inventing elements."
+                )),
+                ("user", "{resume_text}")
+            ])
+            chain = prompt_template | structured_llm
+            result = chain.invoke({"resume_text": raw_text})
             
-            # Check if entering the targeted section
-            if any(lower_line.startswith(hdr) or lower_line == hdr for hdr in headers):
-                in_section = True
-                continue
-            
-            if in_section:
-                # If we encounter a line matching another section header, we stop parsing the current one
-                if any(lower_line.startswith(stop_hdr) or lower_line == stop_hdr for stop_hdr in all_other_stop_headers):
-                    break
-                
-                # Append line if it's descriptive
-                if len(line) > 5:
-                    # Strip bullet point markers (-, *, •)
-                    clean_line = re.sub(r'^[\-\*•\s\d\.\)]+', '', line).strip()
-                    if clean_line:
-                        section_items.append(clean_line)
-                        
-            # Limit the size of parsed lines per section to avoid spilling
-            if len(section_items) >= 15:
-                break
-                
-        return section_items
+            skills_flat = list(dict.fromkeys(result.technical_skills + result.tools + result.frameworks + result.domain_skills))
+            parsed_data = {
+                "name": result.name.strip() if result.name else "Unknown",
+                "email": result.email.strip() if result.email else "Unknown",
+                "phone": result.phone.strip() if result.phone else "Unknown",
+                "title": result.title.strip() if result.title else "Professional Specialist",
+                "bio": result.bio.strip() if result.bio else "Passionate specialist in their domain.",
+                "experience_years": int(result.experience_years) if result.experience_years is not None else 0,
+                "education": [e.strip() for e in result.education if e.strip()],
+                "projects": [p.strip() for p in result.projects if p.strip()],
+                "experience": [exp.strip() for exp in result.experience if exp.strip()],
+                "certifications": [c.strip() for c in result.certifications if c.strip()],
+                "technical_skills": [s.strip() for s in result.technical_skills if s.strip()],
+                "tools": [t.strip() for t in result.tools if t.strip()],
+                "frameworks": [f.strip() for f in result.frameworks if f.strip()],
+                "domain_skills": [d.strip() for d in result.domain_skills if d.strip()],
+                "skills": skills_flat
+            }
+        except Exception as e:
+            print(f"LLM full resume extraction failed: {e}. Attempting JSON fallback...")
+            try:
+                from langchain_core.prompts import ChatPromptTemplate
+                raw_prompt = ChatPromptTemplate.from_messages([
+                    ("system", (
+                        "You are an expert resume parser. Extract a comprehensive, structured representation of the candidate's details.\n"
+                        "You MUST respond ONLY with a raw JSON block. Do not write any markdown code fences, headers, or text outside the JSON.\n"
+                        "The JSON must have the following keys at the root level:\n"
+                        "- name: string\n"
+                        "- email: string\n"
+                        "- phone: string\n"
+                        "- title: string\n"
+                        "- bio: string\n"
+                        "- experience_years: integer\n"
+                        "- education: list of strings\n"
+                        "- projects: list of strings\n"
+                        "- experience: list of strings\n"
+                        "- certifications: list of strings\n"
+                        "- technical_skills: list of strings\n"
+                        "- tools: list of strings\n"
+                        "- frameworks: list of strings\n"
+                        "- domain_skills: list of strings"
+                    )),
+                    ("user", "{resume_text}")
+                ])
+                raw_chain = raw_prompt | llm
+                raw_response = raw_chain.invoke({"resume_text": raw_text})
+                raw_content = raw_response.content
+                json_match = re.search(r"(\{.*\})", raw_content, re.DOTALL)
+                if json_match:
+                    parsed_json = json.loads(json_match.group(1))
+                    tech = [s.strip() for s in parsed_json.get("technical_skills", []) if isinstance(s, str)]
+                    tools = [t.strip() for t in parsed_json.get("tools", []) if isinstance(t, str)]
+                    framer = [f.strip() for f in parsed_json.get("frameworks", []) if isinstance(f, str)]
+                    domain = [d.strip() for d in parsed_json.get("domain_skills", []) if isinstance(d, str)]
+                    skills_flat = list(dict.fromkeys(tech + tools + framer + domain))
+                    
+                    parsed_data = {
+                        "name": parsed_json.get("name", "Unknown").strip(),
+                        "email": parsed_json.get("email", "Unknown").strip(),
+                        "phone": parsed_json.get("phone", "Unknown").strip(),
+                        "title": parsed_json.get("title", "Professional Specialist").strip(),
+                        "bio": parsed_json.get("bio", "Passionate specialist in their domain.").strip(),
+                        "experience_years": int(parsed_json.get("experience_years", 0)),
+                        "education": [e.strip() for e in parsed_json.get("education", []) if isinstance(e, str)],
+                        "projects": [p.strip() for p in parsed_json.get("projects", []) if isinstance(p, str)],
+                        "experience": [exp.strip() for exp in parsed_json.get("experience", []) if isinstance(exp, str)],
+                        "certifications": [c.strip() for c in parsed_json.get("certifications", []) if isinstance(c, str)],
+                        "technical_skills": tech,
+                        "tools": tools,
+                        "frameworks": framer,
+                        "domain_skills": domain,
+                        "skills": skills_flat
+                    }
+                else:
+                    raise ValueError("Could not find a valid JSON object block in LLM response.")
+            except Exception as final_err:
+                raise RuntimeError(f"AI Resume Parser failed completely: {final_err}")
+
+        return parsed_data
 
 
 # Expose parser singleton

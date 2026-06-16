@@ -17,6 +17,20 @@ async def lifespan(app: FastAPI):
     # Startup tasks (e.g. database pool validation, initializing services)
     from app.core.database import engine, Base
     import app.models
+    from sqlalchemy import text
+    
+    # Automatic database migrations for added columns (ensures existing local DB does not break)
+    with engine.begin() as conn:
+        try:
+            # PostgreSQL syntax
+            conn.execute(text("ALTER TABLE resumes ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;"))
+        except Exception:
+            try:
+                # SQLite fallback
+                conn.execute(text("ALTER TABLE resumes ADD COLUMN is_active BOOLEAN DEFAULT TRUE;"))
+            except Exception:
+                pass
+                
     Base.metadata.create_all(bind=engine)
     yield
     # Shutdown tasks (e.g. closing connections, cleaning up background workers)

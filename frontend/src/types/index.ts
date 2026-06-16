@@ -34,6 +34,7 @@ export interface Resume {
   file_size: number;
   raw_text: string | null;
   parsed_data: ParsedData | null;
+  is_active: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -53,6 +54,10 @@ export interface SkillGap {
   user_skills_count: number;
   target_skills_count: number;
   focus_areas: Record<string, string[]>;
+  strengths: string[];
+  weaknesses: string[];
+  learning_priorities: string[];
+  reasoning: string;
 }
 
 export interface RoadmapTask {

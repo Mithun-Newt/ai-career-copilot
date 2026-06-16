@@ -12,7 +12,8 @@ import {
   BookOpen,
   Briefcase,
   Layers,
-  Trash2
+  Trash2,
+  Check
 } from "lucide-react";
 import apiClient from "../api/client";
 import { Resume } from "../types";
@@ -51,6 +52,15 @@ export const ResumeUpload: React.FC = () => {
       }
     } catch (err: any) {
       setError(err.response?.data?.detail || "Failed to delete the resume.");
+    }
+  };
+
+  const handleActivateResume = async (resumeId: string) => {
+    try {
+      await apiClient.put(`/resumes/${resumeId}/activate`);
+      fetchResumes();
+    } catch (err: any) {
+      setError(err.response?.data?.detail || "Failed to activate the selected resume.");
     }
   };
 
@@ -355,28 +365,49 @@ export const ResumeUpload: React.FC = () => {
             {uploadedResumes.map((res) => (
               <div 
                 key={res.id} 
-                className="p-4 bg-white/[0.01] border border-white/5 rounded-2xl flex items-center justify-between transition-all duration-300 hover:border-white/15 hover:bg-white/[0.02]"
+                className={`p-4 rounded-2xl flex items-center justify-between transition-all duration-300 border ${
+                  res.is_active 
+                    ? "bg-purple-500/[0.03] border-purple-500/20 shadow-[0_0_15px_rgba(168,85,247,0.02)]" 
+                    : "bg-white/[0.01] border-white/5 hover:border-white/15 hover:bg-white/[0.02]"
+                }`}
               >
                 <div 
                   onClick={() => setParsedData(res)} 
                   className="flex items-center space-x-3 overflow-hidden cursor-pointer flex-1"
                 >
                   <FileText className="h-6 w-6 text-purple-400 flex-shrink-0" />
-                  <div className="overflow-hidden">
-                    <span className="text-xs font-semibold text-gray-200 block truncate">{res.filename}</span>
-                    <span className="text-[10px] text-gray-500 font-mono">
+                  <div className="overflow-hidden space-y-0.5">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs font-semibold text-gray-200 truncate">{res.filename}</span>
+                      {res.is_active && (
+                        <span className="px-1.5 py-0.5 bg-green-500/10 border border-green-500/20 text-green-400 text-[8px] rounded font-mono uppercase tracking-wider font-bold">Active</span>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-gray-500 font-mono block">
                       {(res.file_size / (1024 * 1024)).toFixed(2)} MB • {new Date(res.created_at).toLocaleDateString()}
                     </span>
                   </div>
                 </div>
 
-                <button
-                  onClick={() => handleDeleteResume(res.id)}
-                  className="p-2 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl hover:bg-red-500/20 hover:text-red-300 transition-colors ml-4"
-                  title="Delete Resume"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
+                <div className="flex items-center">
+                  {!res.is_active && (
+                    <button
+                      onClick={() => handleActivateResume(res.id)}
+                      className="p-2 bg-purple-500/10 border border-purple-500/20 text-purple-400 rounded-xl hover:bg-purple-500/20 hover:text-purple-300 transition-colors ml-2"
+                      title="Set as Active Resume"
+                    >
+                      <Check className="h-4 w-4" />
+                    </button>
+                  )}
+
+                  <button
+                    onClick={() => handleDeleteResume(res.id)}
+                    className="p-2 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl hover:bg-red-500/20 hover:text-red-300 transition-colors ml-2"
+                    title="Delete Resume"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
             ))}
           </div>

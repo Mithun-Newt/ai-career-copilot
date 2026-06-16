@@ -68,6 +68,9 @@ class SkillService:
         if not user:
             raise EntityNotFoundError("User", user_id)
 
+        # Overwrite user skills instead of appending, making the active resume's skills the active set
+        user.skills = []
+
         for skill_name in resume_skills:
             # 1. Normalize skill name representation (trim whitespace & title case)
             normalized_name = skill_name.strip()

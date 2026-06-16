@@ -123,6 +123,34 @@ def delete_resume(
         )
 
 
+@router.put(
+    "/{resume_id}/activate",
+    response_model=ResumeResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Set an uploaded resume as the active resume"
+)
+def activate_resume(
+    resume_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+) -> ResumeResponse:
+    """
+    Sets the specified resume as active, syncing profile parameters and skills dynamically.
+    """
+    try:
+        return resume_service.activate_resume(db, resume_id=resume_id, user_id=current_user.id)
+    except EntityNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except ForbiddenError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(e)
+        )
+
+
 @router.get(
     "/{resume_id}/parsed",
     response_model=ResumeParsedResponse,

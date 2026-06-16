@@ -1,5 +1,6 @@
 import uuid
 import logging
+import json
 from typing import List, Optional
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -169,11 +170,13 @@ class CareerCoachService:
                 ("system", (
                     "You are an expert, highly encouraging AI Career Coach. Your goal is to guide the candidate "
                     "on transitions, learning strategies, and timeline analysis.\n"
-                    "Answer queries by heavily aligning your advice with the candidate's profile and active roadmap below.\n\n"
+                    "Answer queries by heavily aligning your advice with the candidate's profile, parsed resume, skill gap analysis, ATS analysis, and active roadmap below.\n\n"
                     "=== Candidate Profile Context ===\n"
                     "{context}\n"
                     "=================================\n\n"
-                    "Provide a professional, clear, and actionable mentoring response. Do not repeat a canned or generic advice response. Address user queries directly."
+                    "CRITICAL REQUIREMENT: You must NEVER answer from generic prompts or give canned, generic advice if the candidate's profile context is populated. "
+                    "If candidate data exists in the context above, you MUST base your response entirely on their specific details (their skills, experience, projects, education, roadmap, skill gap analysis, and ATS evaluation). "
+                    "Cite their specific skills and steps from their roadmap, and refer to their actual strengths and weaknesses. Generic, non-contextualized advice is strictly prohibited and unacceptable."
                 )),
                 MessagesPlaceholder(variable_name="history"),
                 ("user", "{message}")
@@ -217,33 +220,106 @@ class CareerCoachService:
 
     def _build_dynamic_context(self, db: Session, user_id: uuid.UUID) -> str:
         """
-        Gathers profile, resume, skills, and roadmap details to build coaching context.
+        Gathers profile, parsed resume, skill gap analysis, ATS analysis, and roadmap details to build coaching context.
         """
-        # Fetch profile
+        # 1. Fetch Profile Info
         profile = db.query(Profile).filter(Profile.user_id == user_id).first()
         profile_info = "No profile set up."
         if profile:
-            profile_info = f"Title: {profile.title or 'N/A'}\nExperience: {profile.experience_years or 0} years\nBio: {profile.bio or 'N/A'}"
+            profile_info = (
+                f"Title: {profile.title or 'N/A'}\n"
+                f"Experience: {profile.experience_years or 0} years\n"
+                f"Bio: {profile.bio or 'N/A'}"
+            )
 
-        # Fetch latest resume
-        resume = db.query(Resume).filter(Resume.user_id == user_id).order_by(Resume.created_at.desc()).first()
+        # 2. Fetch Active/Latest Resume & Full Parsed Resume JSON
+        resume = db.query(Resume).filter(Resume.user_id == user_id, Resume.is_active == True).first()
+        if not resume:
+            resume = db.query(Resume).filter(Resume.user_id == user_id).order_by(Resume.created_at.desc()).first()
+        
         resume_info = "No resume uploaded."
+        parsed_resume_json = "No parsed resume data available."
+        resume_skills = []
+        
         if resume and resume.parsed_data:
-            data = resume.parsed_data
-            skills = ", ".join(data.get("skills", []))
-            resume_info = f"Current Skills: {skills}\nExperience Snippet: {', '.join(data.get('experience', []))[:300]}"
+            resume_skills = resume.parsed_data.get("skills", [])
+            parsed_resume_json = json.dumps(resume.parsed_data, indent=2, ensure_ascii=False)
+            resume_info = (
+                f"Filename: {resume.filename}\n"
+                f"Candidate Name: {resume.parsed_data.get('name', 'N/A')}\n"
+                f"Title: {resume.parsed_data.get('title', 'N/A')}\n"
+                f"Bio: {resume.parsed_data.get('bio', 'N/A')}\n"
+                f"Extracted Skills: {', '.join(resume_skills)}"
+            )
 
-        # Fetch active roadmap
+        # 3. Fetch Active Roadmap
         roadmap = db.query(Roadmap).filter(Roadmap.user_id == user_id).order_by(Roadmap.created_at.desc()).first()
         roadmap_info = "No active roadmap."
+        target_role = None
         if roadmap:
-            tasks_list = [f"Step {t.sequence}: {t.title} ({t.status})" for t in roadmap.tasks[:6]]
-            roadmap_info = f"Target Role: {roadmap.target_role}\nActive Path title: {roadmap.title}\nKey tasks:\n" + "\n".join(tasks_list)
+            target_role = roadmap.target_role
+            tasks_list = [
+                f"Step {t.sequence}: {t.title} - {t.description or 'No description'} (Status: {t.status})"
+                for t in roadmap.tasks
+            ]
+            roadmap_info = (
+                f"Target Role: {target_role}\n"
+                f"Roadmap Title: {roadmap.title}\n"
+                f"Roadmap Description: {roadmap.description or 'N/A'}\n"
+                f"Steps:\n" + "\n".join(tasks_list)
+            )
+
+        # 4. Perform Dynamic Skill Gap Analysis
+        skill_gap_info = "No skill gap analysis available (requires an active resume and target role)."
+        if resume and target_role:
+            try:
+                from app.ai.skill_gap_analyzer import skill_gap_analyzer
+                gap_analysis = skill_gap_analyzer.analyze_gap(
+                    user_skills=resume_skills,
+                    target_role=target_role,
+                    user_id=user_id,
+                    resume_id=resume.id,
+                    parsed_resume=resume.parsed_data,
+                    raw_resume_text=resume.raw_text
+                )
+                skill_gap_info = (
+                    f"Match Percentage Score: {gap_analysis.get('match_percentage', 0)}%\n"
+                    f"Core Required Skills: {', '.join(gap_analysis.get('core_required', []))}\n"
+                    f"Core Matched Skills: {', '.join(gap_analysis.get('core_matched', []))}\n"
+                    f"Supporting Required Skills: {', '.join(gap_analysis.get('supporting_required', []))}\n"
+                    f"Supporting Matched Skills: {', '.join(gap_analysis.get('supporting_matched', []))}\n"
+                    f"Transferable Required Skills: {', '.join(gap_analysis.get('transferable_required', []))}\n"
+                    f"Transferable Matched Skills: {', '.join(gap_analysis.get('transferable_matched', []))}\n"
+                    f"Missing Skills: {', '.join(gap_analysis.get('missing_skills', []))}\n"
+                    f"Strengths Identified: {', '.join(gap_analysis.get('strengths', []))}\n"
+                    f"Weaknesses/Gaps Identified: {', '.join(gap_analysis.get('weaknesses', []))}\n"
+                    f"Immediate Learning Priorities: {', '.join(gap_analysis.get('learning_priorities', []))}\n"
+                    f"Scoring Breakdown & Match Reasoning:\n{gap_analysis.get('reasoning', 'N/A')}"
+                )
+            except Exception as e:
+                skill_gap_info = f"Failed to perform dynamic skill gap analysis: {str(e)}"
+
+        # 5. Fetch Latest ATS Analysis
+        from app.models.ats_analysis import ATSAnalysis
+        ats_record = db.query(ATSAnalysis).filter(ATSAnalysis.user_id == user_id).order_by(ATSAnalysis.created_at.desc()).first()
+        ats_info = "No ATS analysis results found."
+        if ats_record:
+            ats_info = (
+                f"ATS Score: {ats_record.ats_score}/100\n"
+                f"Match Percentage: {ats_record.match_percentage}%\n"
+                f"Missing Skills: {', '.join(ats_record.missing_skills)}\n"
+                f"Missing Keywords: {', '.join(ats_record.missing_keywords)}\n"
+                f"Strengths: {', '.join(ats_record.strengths)}\n"
+                f"Weaknesses: {', '.join(ats_record.weaknesses)}\n"
+                f"Recommendations: {json.dumps(ats_record.recommendations, indent=2, ensure_ascii=False)}"
+            )
 
         return (
-            f"--- Candidate Profile ---\n{profile_info}\n\n"
-            f"--- Resume Details ---\n{resume_info}\n\n"
-            f"--- Career Roadmap ---\n{roadmap_info}"
+            f"--- Candidate Profile Info ---\n{profile_info}\n\n"
+            f"--- Full Parsed Resume JSON ---\n{parsed_resume_json}\n\n"
+            f"--- Live Skill Gap Analysis ---\n{skill_gap_info}\n\n"
+            f"--- Latest ATS Analysis ---\n{ats_info}\n\n"
+            f"--- Active Career Roadmap ---\n{roadmap_info}"
         )
 
 

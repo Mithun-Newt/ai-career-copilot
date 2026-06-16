@@ -313,6 +313,81 @@ export const SkillsDashboard: React.FC = () => {
                   </div>
                 </div>
               </div>
+
+              {/* AI Career Analysis & Reasoning */}
+              {gapAnalysis.reasoning && (
+                <div className="glass-card rounded-3xl p-6 relative overflow-hidden">
+                  <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-purple-500/10 to-transparent" />
+                  <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center space-x-2 border-b border-white/5 pb-2 mb-3">
+                    <Sparkles className="h-4 w-4 text-purple-400" />
+                    <span>AI Career Gap Reasoning</span>
+                  </h4>
+                  <p className="text-xs text-gray-300 leading-relaxed font-sans">{gapAnalysis.reasoning}</p>
+                </div>
+              )}
+
+              {/* Strengths & Weaknesses */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Strengths */}
+                <div className="glass-card rounded-3xl p-6 space-y-3">
+                  <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center space-x-2 border-b border-white/5 pb-2">
+                    <CheckCircle2 className="h-4 w-4 text-green-400" />
+                    <span>Identified Strengths</span>
+                  </h4>
+                  <ul className="space-y-2 pt-1">
+                    {gapAnalysis.strengths && gapAnalysis.strengths.length > 0 ? (
+                      gapAnalysis.strengths.map((str, idx) => (
+                        <li key={idx} className="text-xs text-gray-300 flex items-start space-x-2">
+                          <span className="text-green-500 font-bold">•</span>
+                          <span>{str}</span>
+                        </li>
+                      ))
+                    ) : (
+                      <li className="text-xs text-gray-500">No profile strengths listed.</li>
+                    )}
+                  </ul>
+                </div>
+
+                {/* Weaknesses */}
+                <div className="glass-card rounded-3xl p-6 space-y-3">
+                  <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center space-x-2 border-b border-white/5 pb-2">
+                    <HelpCircle className="h-4 w-4 text-red-400" />
+                    <span>Focus Gaps & Weaknesses</span>
+                  </h4>
+                  <ul className="space-y-2 pt-1">
+                    {gapAnalysis.weaknesses && gapAnalysis.weaknesses.length > 0 ? (
+                      gapAnalysis.weaknesses.map((weak, idx) => (
+                        <li key={idx} className="text-xs text-gray-300 flex items-start space-x-2">
+                          <span className="text-red-400 font-bold">•</span>
+                          <span>{weak}</span>
+                        </li>
+                      ))
+                    ) : (
+                      <li className="text-xs text-gray-500">No core weaknesses identified.</li>
+                    )}
+                  </ul>
+                </div>
+              </div>
+
+              {/* Learning Priorities */}
+              {gapAnalysis.learning_priorities && gapAnalysis.learning_priorities.length > 0 && (
+                <div className="glass-card rounded-3xl p-6 space-y-4">
+                  <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center space-x-2 border-b border-white/5 pb-2">
+                    <BookOpen className="h-4 w-4 text-cyan-400" />
+                    <span>Immediate Study & Learning Priorities</span>
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {gapAnalysis.learning_priorities.map((item, idx) => (
+                      <div key={idx} className="p-4 bg-purple-500/[0.02] border border-purple-500/10 rounded-2xl flex items-start space-x-3">
+                        <div className="flex-shrink-0 h-6 w-6 rounded-full bg-purple-500/10 flex items-center justify-center text-purple-400 text-xs font-bold font-mono">
+                          {idx + 1}
+                        </div>
+                        <span className="text-xs text-gray-300 font-medium leading-relaxed">{item}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Right side: User Profile catalog management */}

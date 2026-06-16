@@ -37,11 +37,27 @@ class RoadmapService:
         if resume.user_id != user_id:
             raise ForbiddenError("You do not have permission to use this resume for roadmap generation")
 
-        # 3. Retrieve parsed metadata content
+        # 3. Retrieve parsed metadata content and compute missing skills
         parsed_resume = resume.parsed_data or {}
+        user_skills = parsed_resume.get("skills", [])
+        
+        from app.ai.skill_gap_analyzer import skill_gap_analyzer
+        try:
+            gap_analysis = skill_gap_analyzer.analyze_gap(
+                user_skills=user_skills,
+                target_role=target_role,
+                user_id=user_id,
+                resume_id=resume.id,
+                parsed_resume=parsed_resume,
+                raw_resume_text=resume.raw_text
+            )
+            missing_skills = gap_analysis.get("missing_skills", [])
+        except Exception as gap_err:
+            print(f"RoadmapService: failed to compute skill gap: {gap_err}. Defaulting to empty missing skills.")
+            missing_skills = []
 
         # 4. Invoke the AI RoadmapGenerator
-        roadmap_payload = roadmap_generator.generate_roadmap(parsed_resume, target_role)
+        roadmap_payload = roadmap_generator.generate_roadmap(parsed_resume, target_role, missing_skills)
 
         # 5. Persist parent Roadmap record
         db_roadmap = Roadmap(

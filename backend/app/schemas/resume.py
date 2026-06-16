@@ -58,6 +58,10 @@ class ResumeResponse(ResumeBase, UUIDBase, TimestampBase):
         None,
         description="Extracted structured JSON representation"
     )
+    is_active: bool = Field(
+        True,
+        description="Indicates if this is the active resume version for career context"
+    )
 
 
 class ResumeUploadResponse(ResumeResponse):

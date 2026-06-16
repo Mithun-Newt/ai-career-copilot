@@ -1,5 +1,6 @@
 import os
 import re
+import json
 from typing import Dict, Any, List
 import httpx
 from pydantic import BaseModel, Field
@@ -96,16 +97,12 @@ class RoadmapGenerator:
     """
 
     def generate_roadmap(
-        self, parsed_resume: Dict[str, Any], target_role: str
+        self, parsed_resume: Dict[str, Any], target_role: str, missing_skills: List[str]
     ) -> Dict[str, Any]:
         """
-        Evaluate candidate details and target role to compile a customized career learning pathway.
-        Queries live web search first, then uses LLM to synthesize it. Falls back to search-based
-        mockup model if API keys are missing.
+        Evaluate candidate details, target role, and missing skills to compile a customized career learning pathway.
+        Does not generate generic pathways.
         """
-        # Fetch live career data from web search
-        web_requirements = search_role_requirements_on_web(target_role)
-        
         llm = get_llm()
         if llm is not None:
             try:
@@ -115,18 +112,17 @@ class RoadmapGenerator:
                     ("system", (
                         "You are an expert career transition coach and technical mentor.\n"
                         "Your task is to generate a highly personalized, structured learning roadmap "
-                        "for a user trying to transition from their current profile to a target role.\n"
-                        "Use the provided real-time Web Search Requirements to align with industry expectations "
-                        "for the role, then compare them against their parsed resume data to design a phased learning roadmap.\n"
-                        "Create a sequenced milestone path with actionable tasks.\n"
+                        "designed to help a candidate transition into a target role.\n"
+                        "You MUST generate the roadmap ONLY from: the candidate's Resume JSON, the Target Role, and their specific Missing Skills.\n"
+                        "Focus entirely on teaching the missing skills and closing the gap. Do NOT generate generic roadmaps.\n"
+                        "Create a sequenced milestone path with actionable tasks tailored specifically to their background.\n"
                         "For every task, you MUST populate the 'resources' field with 2-3 high-quality direct URLs to study it "
                         "(e.g., YouTube results: 'https://www.youtube.com/results?search_query=...', official site links, or guides)."
                     )),
                     ("user", (
                         "Target Role: {target_role}\n\n"
-                        "Real-time Web Search Requirements:\n{web_requirements}\n\n"
-                        "Candidate Resume Data:\n{parsed_resume}\n"
-                        "Candidate Extracted Skills: {skills}\n\n"
+                        "Candidate Specific Missing Skills: {missing_skills}\n\n"
+                        "Candidate Resume JSON:\n{parsed_resume}\n\n"
                         "Generate a personalized learning roadmap matching the structured output schema."
                     ))
                 ])
@@ -134,9 +130,8 @@ class RoadmapGenerator:
                 chain = prompt_template | structured_llm
                 result = chain.invoke({
                     "target_role": target_role,
-                    "web_requirements": web_requirements or "Not available.",
-                    "parsed_resume": str(parsed_resume),
-                    "skills": ", ".join(parsed_resume.get("skills", [])),
+                    "missing_skills": ", ".join(missing_skills) if missing_skills else "None (Fully matched). Focus on advanced specialization.",
+                    "parsed_resume": json.dumps(parsed_resume, indent=2, ensure_ascii=False) if isinstance(parsed_resume, dict) else str(parsed_resume),
                 })
                 
                 return {
@@ -159,70 +154,58 @@ class RoadmapGenerator:
             except Exception as e:
                 print(f"Error calling LLM: {e}. Falling back to default pathway.")
 
-        # Fallback dynamically constructed using web requirements
+        # Fallback dynamically constructed using missing skills
         milestones = []
-        if web_requirements:
-            lines = [l.strip() for l in web_requirements.split("\n") if len(l.strip()) > 30]
-            if len(lines) >= 3:
-                milestones = [
-                    {
-                        "title": f"Phase 1: {target_role} Core Foundations",
-                        "description": "Establish core industry-standard definitions, frameworks, and syntax.",
-                        "tasks": [
-                            {"title": "Foundational Competencies", "description": lines[0][:200], "resources": [f"https://www.youtube.com/results?search_query={target_role.replace(' ', '+')}+fundamentals", "https://en.wikipedia.org/wiki/Special:Search?search=" + target_role.replace(" ", "+")]},
-                            {"title": "Essential Tools Integration", "description": lines[1][:200], "resources": [f"https://www.youtube.com/results?search_query={target_role.replace(' ', '+')}+tools"]}
-                        ]
-                    },
-                    {
-                        "title": "Phase 2: Operational Applications",
-                        "description": "Deep dive into execution practices and intermediate tooling expectations.",
-                        "tasks": [
-                            {"title": "Core Workflows Mastery", "description": lines[2][:200], "resources": [f"https://www.youtube.com/results?search_query={target_role.replace(' ', '+')}+workflows"]},
-                            {"title": "Advanced Methodologies", "description": lines[min(3, len(lines)-1)][:200], "resources": [f"https://www.youtube.com/results?search_query={target_role.replace(' ', '+')}+methodologies"]}
-                        ]
-                    },
-                    {
-                        "title": "Phase 3: Industry Synthesis & Capstone",
-                        "description": "Apply learning to production workflows, optimizations, and validations.",
-                        "tasks": [
-                            {"title": "Production Deployment & Delivery", "description": lines[min(4, len(lines)-1)][:200], "resources": [f"https://www.youtube.com/results?search_query={target_role.replace(' ', '+')}+deployment"]},
-                            {"title": "Lifecycle Optimization", "description": lines[min(5, len(lines)-1)][:200], "resources": [f"https://www.youtube.com/results?search_query={target_role.replace(' ', '+')}+optimization"]}
-                        ]
-                    }
-                ]
-                
-        # Safe default if web requirements search returns nothing and no LLM is configured
-        if not milestones:
+        if missing_skills:
+            # Group missing skills into 2 phases
+            half = len(missing_skills) // 2 if len(missing_skills) > 1 else 1
+            skills_p1 = missing_skills[:half]
+            skills_p2 = missing_skills[half:]
+            
             milestones = [
                 {
-                    "title": f"Phase 1: {target_role} Fundamentals",
-                    "description": "Get started with core syntax, workflows, and version control foundations.",
+                    "title": f"Phase 1: Core Skill Acquisition",
+                    "description": f"Master initial core gaps: {', '.join(skills_p1)}",
                     "tasks": [
-                        {"title": "Basic Skills Alignment", "description": f"Learn foundational concepts required to work as a {target_role}.", "resources": [f"https://www.youtube.com/results?search_query={target_role.replace(' ', '+')}+basics"]},
-                        {"title": "Git & Tool Setup", "description": "Configure your development environment and master collaboration basics.", "resources": ["https://git-scm.com/doc", "https://www.youtube.com/results?search_query=git+github+tutorial"]}
+                        {
+                            "title": f"Study {s}",
+                            "description": f"Learn foundational concepts and theory behind {s}.",
+                            "resources": [f"https://www.youtube.com/results?search_query={s.replace(' ', '+')}+tutorial"]
+                        } for s in skills_p1
                     ]
-                },
-                {
-                    "title": "Phase 2: Database & Systems Integration",
-                    "description": "Build intermediate projects and study storage schemas.",
+                }
+            ]
+            if skills_p2:
+                milestones.append({
+                    "title": f"Phase 2: Advanced Integration & Application",
+                    "description": f"Master remaining gaps and build projects: {', '.join(skills_p2)}",
                     "tasks": [
-                        {"title": "Data Management", "description": "Master REST API integrations and structured data stores.", "resources": ["https://www.youtube.com/results?search_query=rest+api+database+basics"]},
-                        {"title": "Security & Auth Essentials", "description": "Learn secure communication patterns and access control implementations.", "resources": ["https://www.youtube.com/results?search_query=oauth2+jwt+security+tutorial"]}
+                        {
+                            "title": f"Implement {s}",
+                            "description": f"Build practical hands-on application demonstrating proficiency in {s}.",
+                            "resources": [f"https://www.youtube.com/results?search_query={s.replace(' ', '+')}+practice+project"]
+                        } for s in skills_p2
                     ]
-                },
+                })
+        else:
+            # 100% matched, focus on advanced specialization project
+            milestones = [
                 {
-                    "title": "Phase 3: Production QA & Delivery",
-                    "description": "Launch projects into production and run quality checks.",
+                    "title": f"Phase 1: Advanced Specialization in {target_role}",
+                    "description": "Candidate already possesses required skills. Focus on deep-dive optimization and engineering benchmarks.",
                     "tasks": [
-                        {"title": "Testing & Debugging", "description": "Implement complete automated testing suites and handle error logs.", "resources": ["https://www.youtube.com/results?search_query=unit+testing+mocking+basics"]},
-                        {"title": "Deployment Pipeline", "description": "Learn containerization and continuous integration strategies.", "resources": ["https://www.docker.com/", "https://www.youtube.com/results?search_query=ci+cd+docker+deployment"]}
+                        {
+                            "title": "System-Level Architecture Analysis",
+                            "description": "Evaluate bottlenecks in existing setups and research next-generation standards.",
+                            "resources": [f"https://www.youtube.com/results?search_query={target_role.replace(' ', '+')}+advanced+architecture"]
+                        }
                     ]
                 }
             ]
 
         return {
             "title": f"AI Transition Roadmap to {target_role}",
-            "description": f"An AI-aligned training blueprint custom designed to transition your profile skills into a {target_role} specialist position.",
+            "description": f"An AI-aligned training blueprint custom designed to transition your profile skills into a {target_role} specialist position by targeting specific gaps.",
             "milestones": milestones
         }
 
